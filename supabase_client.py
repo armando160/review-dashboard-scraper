@@ -92,7 +92,7 @@ def get_unclassified_review_ids(limit: int = 500) -> list[dict[str, Any]]:
         sb.table("reviews")
         .select("id, title, review_text")
         .is_("sentiment", "null")
-        .order("id", desc=False)
+        .order("id", desc=True)   # newest first — prioritise new incoming reviews over backlog
         .limit(limit)
         .execute()
     )
