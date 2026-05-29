@@ -154,8 +154,25 @@ def parse_items(raw_items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
 
-    logger.info("Parsed %d valid products from %d Monday items", len(products), len(raw_items))
-    return products
+    # Deduplicate by ASIN — Monday board has color/size variants that share the
+    # same ASIN. PostgreSQL's ON CONFLICT DO UPDATE rejects a batch that tries to
+    # update the same row twice, so we must collapse duplicates here.
+    # We keep the last occurrence so the most recently-entered Monday item wins.
+    seen: dict[str, dict[str, Any]] = {}
+    for p in products:
+        seen[p["asin"]] = p
+    deduped = list(seen.values())
+
+    if len(deduped) < len(products):
+        logger.warning(
+            "Deduplicated %d duplicate ASINs (Monday items: %d → unique ASINs: %d)",
+            len(products) - len(deduped),
+            len(raw_items),
+            len(deduped),
+        )
+
+    logger.info("Parsed %d valid products from %d Monday items", len(deduped), len(raw_items))
+    return deduped
 
 
 def get_all_products() -> list[dict[str, Any]]:
