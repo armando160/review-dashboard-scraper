@@ -2,8 +2,10 @@ name: Review Dashboard Scraper
 
 on:
   schedule:
-    - cron: '0 11 * * *'   # 6:00 AM EST (UTC-5) = 11:00 UTC
-    - cron: '0 23 * * *'   # 6:00 PM EST (UTC-5) = 23:00 UTC
+    - cron: '0 5 * * *'    # 12:00 AM EST (05:00 UTC)
+    - cron: '0 11 * * *'   #  6:00 AM EST (11:00 UTC)
+    - cron: '0 17 * * *'   # 12:00 PM EST (17:00 UTC)
+    - cron: '0 23 * * *'   #  6:00 PM EST (23:00 UTC)
   workflow_dispatch: {}     # Manual trigger from Actions tab
 
 jobs:
@@ -34,3 +36,5 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
