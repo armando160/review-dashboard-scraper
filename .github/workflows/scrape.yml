@@ -1,0 +1,36 @@
+name: Review Dashboard Scraper
+
+on:
+  schedule:
+    - cron: '0 11 * * *'   # 6:00 AM EST (UTC-5) = 11:00 UTC
+    - cron: '0 23 * * *'   # 6:00 PM EST (UTC-5) = 23:00 UTC
+  workflow_dispatch: {}     # Manual trigger from Actions tab
+
+jobs:
+  scrape:
+    name: Scrape & Classify Reviews
+    runs-on: ubuntu-latest
+    timeout-minutes: 55     # Safety cap — 20 ASINs × ~2.5s delay + API time << 30 min
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pipeline
+        run: python pipeline.py
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          MONDAY_TOKEN: ${{ secrets.MONDAY_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
