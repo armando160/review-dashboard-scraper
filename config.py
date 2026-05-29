@@ -34,7 +34,7 @@ WOOT_DELAY_BETWEEN_ASINS = 2.5  # seconds
 WOOT_REQUEST_TIMEOUT = 30       # seconds
 
 # ── Scraper behaviour ─────────────────────────────────────────────────────────
-ASINS_PER_RUN = 20
+ASINS_PER_RUN = 30
 
 # Tier → hours until next scrape
 TIER_INTERVALS = {1: 24, 2: 48, 3: 72, 4: 96}
