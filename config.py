@@ -52,8 +52,8 @@ def assign_tier(rating: Optional[float]) -> int:
     return 4
 
 # ── Notifications ────────────────────────────────────────────────────────────
-NOTIFY_EMAIL: Optional[str] = os.environ.get("NOTIFY_EMAIL")
-GMAIL_APP_PASSWORD: Optional[str] = os.environ.get("GMAIL_APP_PASSWORD")
+NOTIFY_EMAIL: Optional[str] = os.environ.get("NOTIFY_EMAIL")          # armando@chaivision.com
+GMAIL_APP_PASSWORD: Optional[str] = os.environ.get("GMAIL_APP_PASSWORD")  # App Password for that account
 
 # ── LLM classification ────────────────────────────────────────────────────────
 CLASSIFY_BATCH_SIZE = 10
