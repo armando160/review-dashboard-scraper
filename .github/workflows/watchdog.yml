@@ -51,7 +51,7 @@ jobs:
 
           msg = EmailMessage()
           msg["From"] = notify_email
-          msg["To"] = "rivas.armandoj@gmail.com"
+          msg["To"] = "armando@chaivision.com"
           msg["Subject"] = "Chai Vision: Scraper overdue (" + hours_str + "h since last run)"
           body  = "The review scraper pipeline has not run in " + hours_str + " hours.
 
