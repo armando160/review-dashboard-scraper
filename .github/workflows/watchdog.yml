@@ -2,9 +2,9 @@ name: Pipeline Watchdog
 
 on:
   schedule:
-    - cron: "0 8 * * *"
-    - cron: "0 14 * * *"
-    - cron: "0 20 * * *"
+    - cron: "0 8 * * *"    # 3 AM EST - checks overnight runs
+    - cron: "0 14 * * *"   # 9 AM EST - checks morning run
+    - cron: "0 20 * * *"   # 3 PM EST - checks midday run
   workflow_dispatch: {}
 
 jobs:
@@ -18,7 +18,7 @@ jobs:
     steps:
       - name: Run watchdog
         run: |
-          python3 - << PYRUN
+          python3 << 'PYRUN'
           import os, smtplib, urllib.request, json
           from datetime import datetime, timezone
           from email.message import EmailMessage
@@ -49,31 +49,28 @@ jobs:
           notify_email = os.environ["NOTIFY_EMAIL"]
           gmail_pass = os.environ["GMAIL_APP_PASSWORD"]
 
+          lines = [
+              "The review scraper pipeline has not run in " + hours_str + " hours.",
+              "",
+              "Last successful run: " + last_run_str,
+              "",
+              "Scheduled runs fire at 12 AM, 6 AM, 12 PM, and 6 PM Eastern.",
+              "One or more runs appear to have been skipped by GitHub Actions.",
+              "",
+              "To trigger manually:",
+              "https://github.com/armando160/review-dashboard-scraper/actions",
+              "",
+              "- Chai Vision Watchdog",
+          ]
+
           msg = EmailMessage()
           msg["From"] = notify_email
           msg["To"] = "armando@chaivision.com"
           msg["Subject"] = "Chai Vision: Scraper overdue (" + hours_str + "h since last run)"
-          body  = "The review scraper pipeline has not run in " + hours_str + " hours.
-
-"
-          body += "Last successful run: " + last_run_str + "
-
-"
-          body += "Scheduled runs fire at 12 AM, 6 AM, 12 PM, and 6 PM Eastern.
-"
-          body += "One or more runs appear to have been skipped by GitHub Actions.
-
-"
-          body += "To trigger manually:
-"
-          body += "https://github.com/armando160/review-dashboard-scraper/actions
-
-"
-          body += "- Chai Vision Watchdog"
-          msg.set_content(body)
+          msg.set_content("\n".join(lines))
 
           with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
               s.login(notify_email, gmail_pass)
               s.send_message(msg)
-              print("Alert email sent")
+              print("Alert email sent to armando@chaivision.com")
           PYRUN
