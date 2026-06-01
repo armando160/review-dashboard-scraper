@@ -2,75 +2,61 @@ name: Pipeline Watchdog
 
 on:
   schedule:
-    - cron: "0 8 * * *"    # 3 AM EST - checks overnight runs
-    - cron: "0 14 * * *"   # 9 AM EST - checks morning run
-    - cron: "0 20 * * *"   # 3 PM EST - checks midday run
+    - cron: "0 8 * * *"    # 3 AM EST
+    - cron: "0 14 * * *"   # 9 AM EST
+    - cron: "0 20 * * *"   # 3 PM EST
   workflow_dispatch: {}
 
 jobs:
   watchdog:
     name: Check scraper ran recently
     runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      NOTIFY_EMAIL: ${{ secrets.NOTIFY_EMAIL }}
-      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
     steps:
-      - name: Run watchdog
+      - name: Check last successful run
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python3 << 'PYRUN'
-          import os, smtplib, urllib.request, json
-          from datetime import datetime, timezone
-          from email.message import EmailMessage
+          LAST_RUN=$(gh api "repos/armando160/review-dashboard-scraper/actions/workflows/scrape.yml/runs?status=success&per_page=1" --jq ".workflow_runs[0].updated_at")
+          if [ -z "$LAST_RUN" ] || [ "$LAST_RUN" = "null" ]; then
+            echo "overdue=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          LAST_EPOCH=$(date -d "$LAST_RUN" +%s)
+          NOW_EPOCH=$(date +%s)
+          HOURS=$(( (NOW_EPOCH - LAST_EPOCH) / 3600 ))
+          echo "Last run: $LAST_RUN (${HOURS}h ago)"
+          echo "hours=$HOURS" >> $GITHUB_OUTPUT
+          echo "last_run=$LAST_RUN" >> $GITHUB_OUTPUT
+          if [ "$HOURS" -ge 10 ]; then
+            echo "overdue=true" >> $GITHUB_OUTPUT
+            echo "Pipeline is OVERDUE by ${HOURS}h - will send alert"
+          else
+            echo "overdue=false" >> $GITHUB_OUTPUT
+            echo "OK - last run was ${HOURS}h ago"
+          fi
 
-          token = os.environ["GH_TOKEN"]
-          url = "https://api.github.com/repos/armando160/review-dashboard-scraper/actions/workflows/scrape.yml/runs?status=success&per_page=1"
-          req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token, "Accept": "application/vnd.github+json"})
-          with urllib.request.urlopen(req) as r:
-              data = json.loads(r.read())
+      - name: Send alert email
+        if: steps.check.outputs.overdue == 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.NOTIFY_EMAIL }}
+          password: ${{ secrets.GMAIL_APP_PASSWORD }}
+          subject: "Chai Vision: Scraper overdue (${{ steps.check.outputs.hours }}h since last run)"
+          to: armando@chaivision.com
+          from: ${{ secrets.NOTIFY_EMAIL }}
+          body: |
+            The review scraper pipeline has not run in ${{ steps.check.outputs.hours }} hours.
 
-          runs = data.get("workflow_runs", [])
-          if not runs:
-              print("No successful runs found")
-              exit(0)
+            Last successful run: ${{ steps.check.outputs.last_run }}
 
-          last_run_str = runs[0]["updated_at"]
-          last_run = datetime.fromisoformat(last_run_str.replace("Z", "+00:00"))
-          now = datetime.now(timezone.utc)
-          hours_ago = (now - last_run).total_seconds() / 3600
-          print("Last run: " + last_run_str + " (" + str(round(hours_ago, 1)) + "h ago)")
+            Scheduled runs fire at 12 AM, 6 AM, 12 PM, and 6 PM Eastern.
+            One or more runs appear to have been skipped by GitHub Actions.
 
-          if hours_ago < 10:
-              print("OK - within threshold")
-              exit(0)
+            To trigger manually:
+            https://github.com/armando160/review-dashboard-scraper/actions
 
-          print("OVERDUE - sending alert email")
-          hours_str = str(round(hours_ago))
-          notify_email = os.environ["NOTIFY_EMAIL"]
-          gmail_pass = os.environ["GMAIL_APP_PASSWORD"]
-
-          lines = [
-              "The review scraper pipeline has not run in " + hours_str + " hours.",
-              "",
-              "Last successful run: " + last_run_str,
-              "",
-              "Scheduled runs fire at 12 AM, 6 AM, 12 PM, and 6 PM Eastern.",
-              "One or more runs appear to have been skipped by GitHub Actions.",
-              "",
-              "To trigger manually:",
-              "https://github.com/armando160/review-dashboard-scraper/actions",
-              "",
-              "- Chai Vision Watchdog",
-          ]
-
-          msg = EmailMessage()
-          msg["From"] = notify_email
-          msg["To"] = "armando@chaivision.com"
-          msg["Subject"] = "Chai Vision: Scraper overdue (" + hours_str + "h since last run)"
-          msg.set_content("\n".join(lines))
-
-          with smtplib.SMTP_SSL("smtp.gmail.com", 465) as s:
-              s.login(notify_email, gmail_pass)
-              s.send_message(msg)
-              print("Alert email sent to armando@chaivision.com")
-          PYRUN
+            - Chai Vision Watchdog
