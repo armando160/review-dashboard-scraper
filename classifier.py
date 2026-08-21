@@ -81,7 +81,7 @@ def _call_openrouter(messages: list[dict]) -> Optional[str]:
                 "Content-Type": "application/json",
             },
             json={
-                "model": "anthropic/claude-3-5-haiku",
+                "model": "anthropic/claude-haiku-4.5",
                 "messages": messages,
                 "temperature": 0.1,
                 "max_tokens": 1024,
