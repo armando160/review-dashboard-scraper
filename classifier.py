@@ -1,6 +1,6 @@
 """LLM-based sentiment and category classification for reviews.
 
-Fallback chain: OpenRouter (Claude Haiku) → Gemini 2.5 Flash → Groq (Llama 3.3 70B)
+Fallback chain: OpenRouter (Claude Haiku) → Gemini 2.5 Flash → Groq (gpt-oss-20b)
 
 Usage:
     # Normal mode (called by pipeline.py — classifies new unclassified reviews)
@@ -130,7 +130,7 @@ def _call_groq(messages: list[dict]) -> Optional[str]:
                 "Content-Type": "application/json",
             },
             json={
-                "model": "llama-3.3-70b-versatile",
+                "model": "openai/gpt-oss-20b",
                 "messages": messages,
                 "temperature": 0.1,
                 "max_tokens": 1024,
