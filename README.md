@@ -7,7 +7,7 @@ Runs 2× daily via GitHub Actions (6 AM and 6 PM EST).
 
 1. **Brand Sync** — pulls all ASINs, brands, and metadata from the Monday.com board into Supabase `products`
 2. **Scrape** — hits the Woot review API in max mode (5 ratings × 4 sort orders = 20 calls/ASIN), deduplicates via SHA-256 hash, inserts new reviews into Supabase `reviews`
-3. **Classify** — sends unclassified reviews through an LLM (OpenRouter → Gemini → Groq fallback) to assign sentiment and category
+3. **Classify** — sends unclassified reviews through an LLM (OpenRouter → Groq fallback) to assign sentiment and category
 
 ## Setup
 
@@ -29,8 +29,7 @@ In the repo → Settings → Secrets and variables → Actions → New repositor
 | `SUPABASE_KEY` | Supabase **service role** key (from Supabase dashboard → Project Settings → API) |
 | `MONDAY_TOKEN` | Monday.com API token (Profile → Developers → API v2 Token) |
 | `OPENROUTER_API_KEY` | OpenRouter key (primary LLM) |
-| `GEMINI_API_KEY` | Google AI Studio key (fallback) |
-| `GROQ_API_KEY` | Groq key (last-resort fallback) |
+| `GROQ_API_KEY` | Groq key (fallback) |
 
 ### 4. Trigger the first run manually
 

@@ -1,6 +1,6 @@
 """LLM-based sentiment and category classification for reviews.
 
-Fallback chain: OpenRouter (Claude Haiku) → Gemini 2.5 Flash → Groq (gpt-oss-20b)
+Fallback chain: OpenRouter (Claude Haiku) → Groq (gpt-oss-20b)
 
 Usage:
     # Normal mode (called by pipeline.py — classifies new unclassified reviews)
@@ -95,30 +95,6 @@ def _call_openrouter(messages: list[dict]) -> Optional[str]:
         return None
 
 
-def _call_gemini(messages: list[dict]) -> Optional[str]:
-    if not config.GEMINI_API_KEY:
-        return None
-    try:
-        # Combine system + user messages into Gemini's format
-        system_text = next((m["content"] for m in messages if m["role"] == "system"), "")
-        user_text = next((m["content"] for m in messages if m["role"] == "user"), "")
-        combined = f"{system_text}\n\n{user_text}" if system_text else user_text
-
-        resp = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={config.GEMINI_API_KEY}",
-            json={
-                "contents": [{"parts": [{"text": combined}]}],
-                "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1024},
-            },
-            timeout=60,
-        )
-        resp.raise_for_status()
-        return resp.json()["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception as exc:
-        logger.warning("Gemini call failed: %s", exc)
-        return None
-
-
 def _call_groq(messages: list[dict]) -> Optional[str]:
     if not config.GROQ_API_KEY:
         return None
@@ -153,7 +129,7 @@ def _llm_classify(batch: list[dict[str, Any]]) -> Optional[list[dict[str, Any]]]
         {"role": "user", "content": _build_user_message(batch)},
     ]
 
-    for provider_fn in (_call_openrouter, _call_gemini, _call_groq):
+    for provider_fn in (_call_openrouter, _call_groq):
         raw = provider_fn(messages)
         if raw is None:
             continue
