@@ -23,7 +23,6 @@ MONDAY_COL_DEAL_BUCKET = "color_mky9e9at"
 
 # ── LLM keys (optional — pipeline continues if missing) ──────────────────────
 OPENROUTER_API_KEY: Optional[str] = os.environ.get("OPENROUTER_API_KEY")
-GEMINI_API_KEY: Optional[str] = os.environ.get("GEMINI_API_KEY")
 GROQ_API_KEY: Optional[str] = os.environ.get("GROQ_API_KEY")
 
 # ── Woot API ──────────────────────────────────────────────────────────────────

@@ -29,5 +29,4 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           MONDAY_TOKEN: ${{ secrets.MONDAY_TOKEN }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
