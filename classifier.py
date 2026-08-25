@@ -68,11 +68,42 @@ def _build_user_message(batch: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+# Models — single source of truth so logs/errors name exactly what was called.
+OPENROUTER_MODEL = "anthropic/claude-haiku-4.5"
+GROQ_MODEL = "openai/gpt-oss-20b"
+
+
 # ── Provider implementations ──────────────────────────────────────────────────
 
-def _call_openrouter(messages: list[dict]) -> Optional[str]:
+def _short_error(exc: Exception) -> str:
+    """Stable, log-friendly reason used for aggregation (e.g. '401 Unauthorized')."""
+    resp = getattr(exc, "response", None)
+    if resp is not None:
+        return f"{resp.status_code} {(resp.reason or '').strip()}".strip()
+    if isinstance(exc, requests.Timeout):
+        return "timeout"
+    if isinstance(exc, requests.ConnectionError):
+        return "connection error"
+    return type(exc).__name__
+
+
+def _error_body(exc: Exception) -> str:
+    """Extra detail from a provider's error response body, if any (for logs only)."""
+    resp = getattr(exc, "response", None)
+    if resp is None:
+        return ""
+    try:
+        data = resp.json()
+        detail = (data.get("error") or {}).get("message") or data.get("message") or ""
+    except Exception:
+        detail = resp.text or ""
+    return detail.strip()[:200]
+
+
+def _call_openrouter(messages: list[dict]) -> tuple[Optional[str], Optional[str]]:
+    """Returns (content, error_reason). On success error_reason is None."""
     if not config.OPENROUTER_API_KEY:
-        return None
+        return None, "OPENROUTER_API_KEY not configured"
     try:
         resp = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
@@ -81,7 +112,7 @@ def _call_openrouter(messages: list[dict]) -> Optional[str]:
                 "Content-Type": "application/json",
             },
             json={
-                "model": "anthropic/claude-haiku-4.5",
+                "model": OPENROUTER_MODEL,
                 "messages": messages,
                 "temperature": 0.1,
                 "max_tokens": 1024,
@@ -89,15 +120,19 @@ def _call_openrouter(messages: list[dict]) -> Optional[str]:
             timeout=60,
         )
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        return resp.json()["choices"][0]["message"]["content"], None
     except Exception as exc:
-        logger.warning("OpenRouter call failed: %s", exc)
-        return None
+        reason = _short_error(exc)
+        body = _error_body(exc)
+        logger.warning("OpenRouter (%s) failed: %s%s", OPENROUTER_MODEL, reason,
+                       f" — {body}" if body else "")
+        return None, reason
 
 
-def _call_groq(messages: list[dict]) -> Optional[str]:
+def _call_groq(messages: list[dict]) -> tuple[Optional[str], Optional[str]]:
+    """Returns (content, error_reason). On success error_reason is None."""
     if not config.GROQ_API_KEY:
-        return None
+        return None, "GROQ_API_KEY not configured"
     try:
         resp = requests.post(
             "https://api.groq.com/openai/v1/chat/completions",
@@ -106,7 +141,7 @@ def _call_groq(messages: list[dict]) -> Optional[str]:
                 "Content-Type": "application/json",
             },
             json={
-                "model": "openai/gpt-oss-20b",
+                "model": GROQ_MODEL,
                 "messages": messages,
                 "temperature": 0.1,
                 "max_tokens": 1024,
@@ -114,24 +149,37 @@ def _call_groq(messages: list[dict]) -> Optional[str]:
             timeout=60,
         )
         resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
+        return resp.json()["choices"][0]["message"]["content"], None
     except Exception as exc:
-        logger.warning("Groq call failed: %s", exc)
-        return None
+        reason = _short_error(exc)
+        body = _error_body(exc)
+        logger.warning("Groq (%s) failed: %s%s", GROQ_MODEL, reason,
+                       f" — {body}" if body else "")
+        return None, reason
 
 
 # ── LLM dispatch ──────────────────────────────────────────────────────────────
 
-def _llm_classify(batch: list[dict[str, Any]]) -> Optional[list[dict[str, Any]]]:
-    """Send batch to LLM, trying each provider in order. Returns parsed results or None."""
+def _llm_classify(
+    batch: list[dict[str, Any]],
+) -> tuple[Optional[list[dict[str, Any]]], dict[str, str]]:
+    """Send batch to LLM, trying each provider in order.
+
+    Returns (parsed_results, provider_errors). On success provider_errors is empty;
+    on failure it maps each provider label → the reason it failed, so callers can
+    report exactly what went wrong (e.g. {"OpenRouter": "401 Unauthorized"}).
+    """
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {"role": "user", "content": _build_user_message(batch)},
     ]
 
-    for provider_fn in (_call_openrouter, _call_groq):
-        raw = provider_fn(messages)
+    provider_errors: dict[str, str] = {}
+
+    for label, provider_fn in (("OpenRouter", _call_openrouter), ("Groq", _call_groq)):
+        raw, error = provider_fn(messages)
         if raw is None:
+            provider_errors[label] = error or "unknown error"
             continue
         try:
             # Strip markdown code fences if present
@@ -142,22 +190,34 @@ def _llm_classify(batch: list[dict[str, Any]]) -> Optional[list[dict[str, Any]]]
                     text = text[4:]
             parsed = json.loads(text.strip())
             if isinstance(parsed, list):
-                return parsed
+                # Return any earlier-provider failures too: if the primary is down
+                # but a fallback saved the batch, we still want that surfaced as an
+                # early warning rather than hidden behind the success.
+                return parsed, provider_errors
+            provider_errors[label] = "response was not a JSON array"
         except (json.JSONDecodeError, IndexError, KeyError) as exc:
-            logger.warning("Failed to parse LLM response: %s\nRaw: %s", exc, raw[:200])
+            provider_errors[label] = f"unparseable response ({type(exc).__name__})"
+            logger.warning("%s returned an unparseable response: %s\nRaw: %s",
+                           label, exc, raw[:200])
             continue
 
-    logger.error("All LLM providers failed for this batch")
-    return None
+    logger.error(
+        "All LLM providers failed for this batch — %s",
+        ", ".join(f"{k}: {v}" for k, v in provider_errors.items()),
+    )
+    return None, provider_errors
 
 
 # ── Batch processing ──────────────────────────────────────────────────────────
 
-def _process_batch(batch: list[dict[str, Any]]) -> int:
-    """Classify a single batch and write results to Supabase. Returns rows updated."""
-    results = _llm_classify(batch)
+def _process_batch(batch: list[dict[str, Any]]) -> tuple[int, dict[str, str]]:
+    """Classify a single batch and write results to Supabase.
+
+    Returns (rows_updated, provider_errors). provider_errors is empty on success.
+    """
+    results, provider_errors = _llm_classify(batch)
     if not results:
-        return 0
+        return 0, provider_errors
 
     id_map = {r["id"]: r for r in batch}
     updates: list[dict[str, Any]] = []
@@ -192,34 +252,54 @@ def _process_batch(batch: list[dict[str, Any]]) -> int:
             }
         )
 
-    return supabase_client.bulk_update_classifications(updates)
+    # Pass through any provider failures even on success (a fallback may have covered them).
+    return supabase_client.bulk_update_classifications(updates), provider_errors
 
 
-def classify_pending(max_reviews: int = 500) -> dict[str, int]:
+def classify_pending(max_reviews: int = 500) -> dict[str, Any]:
     """Classify up to `max_reviews` unclassified reviews.
 
     Called by pipeline.py after each scrape run.
-    Returns stats: {'found': int, 'classified': int}
+    Returns stats: {
+        'found': int,              # reviews needing classification
+        'classified': int,         # successfully classified
+        'failed': int,             # found - classified
+        'provider_errors': dict,   # "Provider: reason" → count, aggregated across batches
+    }
     """
     reviews = supabase_client.get_unclassified_review_ids(limit=max_reviews)
     if not reviews:
         logger.info("No unclassified reviews found")
-        return {"found": 0, "classified": 0}
+        return {"found": 0, "classified": 0, "failed": 0, "provider_errors": {}}
 
     logger.info("Classifying %d reviews…", len(reviews))
     classified = 0
+    error_counts: dict[str, int] = {}
 
     for i in range(0, len(reviews), config.CLASSIFY_BATCH_SIZE):
         batch = reviews[i: i + config.CLASSIFY_BATCH_SIZE]
-        n = _process_batch(batch)
+        n, provider_errors = _process_batch(batch)
         classified += n
+        for label, reason in provider_errors.items():
+            key = f"{label}: {reason}"
+            error_counts[key] = error_counts.get(key, 0) + 1
         logger.info("Batch %d/%d: %d classified", i // config.CLASSIFY_BATCH_SIZE + 1,
                     (len(reviews) + config.CLASSIFY_BATCH_SIZE - 1) // config.CLASSIFY_BATCH_SIZE, n)
         # Small pause to avoid rate limits
         time.sleep(0.5)
 
+    if error_counts:
+        logger.error(
+            "LLM provider errors this run — %s",
+            "; ".join(f"{k} (×{v})" for k, v in error_counts.items()),
+        )
     logger.info("Classification complete: %d/%d reviews classified", classified, len(reviews))
-    return {"found": len(reviews), "classified": classified}
+    return {
+        "found": len(reviews),
+        "classified": classified,
+        "failed": len(reviews) - classified,
+        "provider_errors": error_counts,
+    }
 
 
 # ── CLI backfill mode ─────────────────────────────────────────────────────────
